@@ -16,6 +16,8 @@ totem gives each project an identity you recognize before you read anything:
 - **A radar of your other sessions.** On the right of the band: every other live session, the one that needs you first. Click one (or press its number after `ctrl+x tab`) and its tab comes to the front.
 - **Nudges.** When another session hits a permission prompt, or finishes a turn that took more than 30 seconds, the session you are looking at tells you so.
 
+![The band above the prompt, up close: PANCAKE in amber pixel letters, then the pancake emoji and name, its branch feat/shopping-list, its path, and "your turn · 2m".](docs/band.png)
+
 ![Switching tabs between the three demo sessions: the whole window changes color with each project.](docs/tabs.gif)
 
 ## The smart part
@@ -138,6 +140,8 @@ claude --plugin-dir .          # run it from this folder; saves hot-reload
 claude plugin test .           # the tests in tests/
 claude plugin validate .       # what the engine will load, and what it would refuse
 ```
+
+`TOTEM_HOME=/some/folder claude --plugin-dir .` gives a session its own totems and radar, so test sessions only see each other and never your real ones. If you also have totem installed, add `--settings '{"enabledPlugins":{"totem@claude-totem":false}}'` so only the working copy runs.
 
 Once a session has loaded the folder, `.claude-plugin/types/` holds this build's API declarations and `tsc -p .` type-checks the mod. See [CONTRIBUTING.md](CONTRIBUTING.md) for where things live and what would help most.
 

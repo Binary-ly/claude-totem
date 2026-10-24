@@ -46,9 +46,13 @@ export const basename = (path: string) =>
   path.replace(/\/+$/, '').split('/').pop() || path
 
 export function slug(key: string): string {
-  const name = basename(key).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)
+  const name = basename(key)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
 
-  return `${name || 'root'}-${hash(key).toString(16).padStart(8, '0')}`
+  return `${name || 'project'}-${hash(key).toString(16).padStart(8, '0')}`
 }
 
 export function hashed(key: string): { emoji: string; hue: number } {

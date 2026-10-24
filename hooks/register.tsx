@@ -322,7 +322,9 @@ async function setState($: $, next: TotemState) {
 
 async function boot($: $, cwd: string) {
   const home = (await $.env.get('HOME')) ?? ''
-  const dir = `${home}/.claude/totem`
+  // TOTEM_HOME keeps a session's totems and radar apart from everyone
+  // else's: a test or demo session sees only its own kind.
+  const dir = (await $.env.get('TOTEM_HOME'))?.trim() || `${home}/.claude/totem`
   const [tty, program, sessionId, root, repo] = await Promise.all([
     findTty($),
     detectProgram($),
@@ -551,7 +553,7 @@ async function doctor($: $): Promise<string> {
     lines.push(`- Terminal.app tab titles: clean (the "${extras.profile}" profile adds no process name).`)
   }
   const list = await read($, peers)
-  lines.push(`- radar: ${list.length} other session${list.length === 1 ? '' : 's'} live`)
+  lines.push(`- radar: ${list.length} other session${list.length === 1 ? '' : 's'} live${rt ? `, in ${rt.dir}` : ''}`)
   if (v.identity) {
     lines.push(
       `- this project: ${v.identity.emoji} ${v.identity.name}, hue ${v.identity.hue}°, ${v.identity.source}`,

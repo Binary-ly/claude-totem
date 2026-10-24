@@ -202,6 +202,8 @@ describe('font and names', () => {
   test('slugs are stable and safe', () => {
     expect(slug('/a/My Project')).toBe(slug('/a/My Project'))
     expect(slug('/a/My Project')).toMatch(/^my-project-[0-9a-f]{8}$/)
+    expect(slug('/a/اشبيليا')).toMatch(/^project-[0-9a-f]{8}$/)
+    expect(slug('/a/(draft) site!')).toMatch(/^draft-site-[0-9a-f]{8}$/)
   })
 
   test('the radar puts whoever needs you first', () => {
