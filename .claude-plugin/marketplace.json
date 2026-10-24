@@ -1,0 +1,12 @@
+{
+  "name": "claude-totem",
+  "owner": { "name": "Binary" },
+  "description": "totem: know which project every Claude Code session is in, at a glance.",
+  "plugins": [
+    {
+      "name": "totem",
+      "source": "./",
+      "description": "Each Claude Code session wears its project's totem: a color across the whole terminal, a big pixel name above the prompt, and a live radar of your other sessions."
+    }
+  ]
+}

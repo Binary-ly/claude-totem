@@ -1,0 +1,51 @@
+{
+  "name": "totem",
+  "version": "0.1.0",
+  "description": "Know which world you're in: each Claude Code session wears its project's totem, a color across the whole terminal, a big pixel name above the prompt, and a live radar of your other sessions.",
+  "types": "./types/index.d.ts",
+  "author": { "name": "Suliman Benhalim" },
+  "homepage": "https://github.com/Binary-ly/claude-totem",
+  "repository": "https://github.com/Binary-ly/claude-totem",
+  "license": "MIT",
+  "keywords": ["terminal", "project", "identity", "tabs", "sessions", "statusline"],
+  "userConfig": {
+    "band": {
+      "type": "string",
+      "title": "Band above the prompt",
+      "description": "big: the project's name in 3-row pixel letters. bar: one colored line. off: nothing.",
+      "default": "big",
+      "options": ["big", "bar", "off"]
+    },
+    "tint": {
+      "type": "boolean",
+      "title": "Tint the terminal",
+      "description": "Wash the terminal background in the project's color while the session runs.",
+      "default": true
+    },
+    "title": {
+      "type": "boolean",
+      "title": "Own the tab title",
+      "description": "Name the tab after the project (emoji, name, state) instead of the task summary.",
+      "default": true
+    },
+    "motion": {
+      "type": "string",
+      "title": "Motion",
+      "description": "full: arrival reveal, a sweep when Claude needs you, and fades. calm: fades only. off: no animation.",
+      "default": "full",
+      "options": ["full", "calm", "off"]
+    },
+    "ai": {
+      "type": "boolean",
+      "title": "Let Claude pick the totem",
+      "description": "The first time a project opens, ask a small model for an emoji and hue that fit it. Off: picked from a hash of the path.",
+      "default": true
+    },
+    "nudges": {
+      "type": "boolean",
+      "title": "Nudges from other sessions",
+      "description": "A toast in the session you are looking at when another one needs you, or finishes a turn longer than 30 seconds.",
+      "default": true
+    }
+  }
+}
