@@ -128,14 +128,14 @@ export function palette(hue: number, isLight: boolean, chroma = 1): Palette {
 
   return isLight
     ? {
-        tint: oklch(0.972, c(0.022), hue),
+        tint: oklch(0.972, c(0.008), hue),
         ink: oklch(0.5, c(0.16), hue),
         glint: oklch(0.72, c(0.2), hue),
         deep: oklch(0.88, c(0.07), hue),
         soft: oklch(0.55, c(0.08), hue),
       }
     : {
-        tint: oklch(0.215, c(0.045), hue),
+        tint: oklch(0.2, c(0.014), hue),
         ink: oklch(0.8, c(0.14), hue),
         glint: oklch(0.96, c(0.05), hue),
         deep: oklch(0.36, c(0.09), hue),
