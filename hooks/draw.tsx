@@ -3,7 +3,7 @@
 
 import type { Color, Elements } from 'claude-code'
 
-import type { TotemIdentity, TotemPeer, TotemState, TotemView } from '../types'
+import type { TotemIdentity, TotemMail, TotemPeer, TotemState, TotemView } from '../types'
 import { hex, palette } from './color'
 import { BAND_ROWS, spell } from './font'
 import { GLYPH, LABEL, age } from './radar'
@@ -33,6 +33,8 @@ export type BandInput = {
   since: number
   now: number
   peers: readonly TotemPeer[]
+  /** The latest message in or out, while it is fresh. */
+  mail: TotemMail | null
   /** The name in pixel letters, when it can be drawn that way. */
   word: Word | null
   onJump: (peer: TotemPeer) => void
@@ -41,6 +43,35 @@ export type BandInput = {
 
 const short = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max - 1)}…` : text
+
+/** The other side of a message in its own ink, or dim when the radar doesn't know it. */
+function MailWho(el: Table, mail: TotemMail, isLight: boolean) {
+  const { Text } = el
+  const who = `${mail.emoji ? `${mail.emoji} ` : ''}${mail.name}`
+
+  return mail.hue === null ? (
+    <Text dimColor>{who}</Text>
+  ) : (
+    <Text color={hex(palette(mail.hue, isLight, mail.chroma).ink)} bold>
+      {who}
+    </Text>
+  )
+}
+
+function MailLine(el: Table, mail: TotemMail, isLight: boolean) {
+  const { Text } = el
+
+  return (
+    <Text wrap="truncate-end">
+      <Text color="claude">{mail.way === 'in' ? '✉ ' : '✉ to '}</Text>
+      {MailWho(el, mail, isLight)}
+      <Text dimColor>
+        {mail.way === 'in' ? ': ' : ' · '}
+        {mail.text}
+      </Text>
+    </Text>
+  )
+}
 
 function PeerChip(el: Table, peer: TotemPeer, index: number, isLight: boolean, onJump: (p: TotemPeer) => void) {
   const { Button, Text } = el
@@ -125,9 +156,13 @@ function Big(input: BandInput, word: Word) {
               </Text>
             ) : null}
           </Text>
-          <Text color={soft} wrap="truncate-start">
-            {view.path}
-          </Text>
+          {input.mail ? (
+            MailLine(el, input.mail, view.isLight)
+          ) : (
+            <Text color={soft} wrap="truncate-start">
+              {view.path}
+            </Text>
+          )}
           <Text wrap="truncate-end">
             <Text color={STATE_COLOR[state]}>
               {GLYPH[state]} {LABEL[state]}
@@ -169,6 +204,14 @@ function Bar(input: BandInput) {
           {view.path}{' '}
         </Text>
         <Box flexGrow={1} />
+        {input.mail ? (
+          <Text backgroundColor={deep} wrap="truncate-end">
+            <Text backgroundColor={deep} color="claude">
+              {input.mail.way === 'in' ? ' ✉ ' : ' ✉ to '}
+            </Text>
+            {MailWho(el, input.mail, view.isLight)}
+          </Text>
+        ) : null}
         <Text backgroundColor={deep} color={STATE_COLOR[state]}>
           {' '}
           {GLYPH[state]} {LABEL[state]}{' '}
@@ -192,12 +235,14 @@ export type PaneInput = {
   since: number
   now: number
   peers: readonly TotemPeer[]
+  /** Messages in and out, newest first. */
+  mail: readonly TotemMail[]
   word: Word | null
   onJump: (peer: TotemPeer) => void
 }
 
 export function Pane(input: PaneInput) {
-  const { el, view, identity, state, since, now, peers, word, onJump } = input
+  const { el, view, identity, state, since, now, peers, mail, word, onJump } = input
   const { Box, Text, Button } = el
   const colors = palette(identity.hue, view.isLight, identity.chroma)
   const ink = hex(colors.ink)
@@ -262,6 +307,23 @@ export function Pane(input: PaneInput) {
           </Button>
         )
       })}
+      {mail.length > 0 && (
+        <Box marginTop={1} flexDirection="column">
+          <Text bold>Messages</Text>
+          {mail.slice(0, 5).map((m, i) => (
+            <Text key={`mail-${m.at}-${i}`} wrap="truncate-end">
+              <Text dimColor>{m.way === 'in' ? '← ' : '→ '}</Text>
+              {MailWho(el, m, view.isLight)}
+              <Text dimColor>
+                {' · '}
+                {age(now - m.at)}
+                {'  '}
+                {m.text}
+              </Text>
+            </Text>
+          ))}
+        </Box>
+      )}
       <Box marginTop={1} flexDirection="column">
         <Text dimColor>/totem color #7c3aed · 210 · next</Text>
         <Text dimColor>/totem emoji 🦊 · /totem name Daisy UI</Text>

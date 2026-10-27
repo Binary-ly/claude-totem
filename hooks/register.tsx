@@ -5,11 +5,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register, Timer } from 'claude-code'
 
-import type { TotemIdentity, TotemPeer, TotemState, TotemView } from '../types'
-import { chooseHue, hex, luminance, mix, oklch, palette, parseHex, toOklch, type Rgb } from './color'
+import type { TotemIdentity, TotemMail, TotemPeer, TotemState, TotemView } from '../types'
+import { chooseHue, hash, hex, luminance, mix, oklch, palette, parseHex, toOklch, type Rgb } from './color'
 import { Band, Forging, NAME_KEY, Pane, type Word } from './draw'
 import { canDraw, frame, measure, rasterize, spell } from './font'
 import { basename, forge, putSaved, recall, recentHues, settleEmoji } from './identity'
+import { bareInbox, preview, readEnvelope } from './mail'
 import { GLYPH, age, liveId, publish, retire, scan } from './radar'
 import {
   detectProgram,
@@ -61,7 +62,8 @@ const status = atom(
   { state: 'idle' as TotemState, since: 0 },
   { shape: 'status-1' },
 )
-const peers = atom({ plugin: 'totem', key: 'peers' } as const, [] as TotemPeer[], { shape: 'peers-1' })
+const peers = atom({ plugin: 'totem', key: 'peers' } as const, [] as TotemPeer[], { shape: 'peers-2' })
+const mail = atom({ plugin: 'totem', key: 'mail' } as const, [] as TotemMail[], { shape: 'mail-1' })
 
 const PANE = 'totem'
 const HEARTBEAT_MS = 5000
@@ -83,6 +85,10 @@ type Runtime = {
    * project back each time it stops.
    */
   ownsTitle: boolean
+  /** This session's inbox as Claude Code names it, so peers can tell its messages apart. */
+  inbox: string | null
+  /** The last message in from another session, said on the radar for its sender. */
+  heard: TotemPeer['heard']
   timers: Timer[]
 }
 
@@ -191,6 +197,8 @@ async function beat($: $) {
   if (!v.identity || !rt) return
   await publish($, rt.dir, {
     id: rt.id,
+    inbox: rt.inbox,
+    heard: rt.heard,
     key: v.identity.key,
     name: v.identity.name,
     emoji: v.identity.emoji,
@@ -216,10 +224,11 @@ async function refreshPeers($: $) {
   const found = await scan($, rt.dir, rt.id, now)
   const current = await read($, peers)
   const sign = (list: readonly TotemPeer[]) =>
-    JSON.stringify(list.map(p => [p.id, p.name, p.emoji, p.hue, p.state, p.since, p.branch]))
+    JSON.stringify(list.map(p => [p.id, p.inbox, p.heard?.at, p.name, p.emoji, p.hue, p.state, p.since, p.branch]))
   if (sign(found) === sign(current)) return
   await update($, peers, () => found)
   if (options.nudges) nudge($, current, found)
+  await landed($, found)
 }
 
 /**
@@ -242,6 +251,122 @@ function nudge($: $, before: readonly TotemPeer[], after: readonly TotemPeer[]) 
   }
 }
 
+// Messages between sessions are Claude Code's own (SendMessage, @ mentions):
+// totem only watches them leave and land, and shows who they were with.
+
+/** How many messages the pane keeps, and how long the band shows the latest. */
+const MAIL_KEPT = 8
+const MAIL_FRESH_MS = 120_000
+/** How long a message sent to a session the radar can't name waits to hear where it landed. */
+const LANDING_MS = 30_000
+
+// The newest landing each peer reported, so each is seen off once.
+const seenLanding = new Map<string, number>()
+
+const party = (peer: TotemPeer) => ({
+  name: peer.name,
+  emoji: peer.emoji,
+  hue: peer.hue,
+  chroma: peer.chroma,
+  branch: peer.branch,
+})
+
+async function keep($: $, entry: TotemMail) {
+  await update($, mail, list => [entry, ...list].slice(0, MAIL_KEPT))
+  $.ui.invalidate('ui.render')
+}
+
+/** The background swells in the sender's color as a message lands: who knocked, at a glance. */
+async function knock($: $, hue: number, chroma: number) {
+  if (!rt?.tty || !options.tint || options.motion === 'off') return
+  const v = await read($, view)
+  if (!v.identity) return
+  const own = palette(v.identity.hue, v.isLight, v.identity.chroma).tint
+  const guest = palette(hue, v.isLight, chroma)
+  const peak = mix(guest.tint, guest.ink, v.isLight ? 0.12 : 0.2)
+  const there = [0.4, 0.75, 1, 1].map(t => osc.background(mix(own, peak, ease(t))))
+  const back = [0.85, 0.65, 0.45, 0.28, 0.14, 0.05, 0].map(t => osc.background(mix(own, peak, t)))
+  await play($, rt.tty, [...there, ...back], 50)
+}
+
+/** A message crossing: the other side's color runs through the name, inward as it lands, outward as it leaves. */
+function cross($: $, peer: TotemPeer, way: 'in' | 'out') {
+  animate($, 'sweep', { hue: peer.hue, chroma: peer.chroma, way })
+  if (way === 'in') void knock($, peer.hue, peer.chroma)
+}
+
+/** Messages to this session's own subagents and teammates are not between sessions. */
+async function isOwnAgent($: $, to: string): Promise<boolean> {
+  const agents = await $.agent.list().catch(() => [])
+
+  return agents.some(a => a.id === to || a.name === to || a.teammateId === to || !!a.teammateId?.startsWith(`${to}@`))
+}
+
+/**
+ * Keeps a message Claude sent another session. The radar names the recipient
+ * by its inbox (a reply) or its project; otherwise the line waits for the
+ * recipient's totem to say it landed.
+ */
+async function seeOff($: $, to: string, text: string) {
+  if (await isOwnAgent($, to)) return
+  const list = await read($, peers)
+  const peer = list.find(p => p.inbox === bareInbox(to)) ?? list.find(p => p.name.toLowerCase() === to.toLowerCase())
+  const isAddress = /[/:\\]/.test(to)
+  await keep($, {
+    way: 'out',
+    ...(peer ? party(peer) : { name: isAddress ? 'a session' : to, emoji: null, hue: null, chroma: 1, branch: null }),
+    text: preview(text),
+    at: await $.clock.now(),
+  })
+  if (peer) cross($, peer, 'out')
+}
+
+/**
+ * A peer's totem says a message from here landed: name the line that was
+ * waiting for it, matched by the hash of its first line, and see it off.
+ */
+async function landed($: $, list: readonly TotemPeer[]) {
+  if (!rt?.inbox) return
+  for (const peer of list) {
+    const heard = peer.heard
+    if (!heard || heard.from !== rt.inbox || (seenLanding.get(peer.id) ?? 0) >= heard.at) continue
+    seenLanding.set(peer.id, heard.at)
+    const waiting = (await read($, mail)).find(
+      m =>
+        m.way === 'out' &&
+        m.hue === null &&
+        hash(m.text) === heard.mark &&
+        heard.at - m.at > -2000 &&
+        heard.at - m.at < LANDING_MS,
+    )
+    if (!waiting) continue
+    await update($, mail, all => all.map(m => (m.way === 'out' && m.at === waiting.at ? { ...m, ...party(peer) } : m)))
+    $.ui.invalidate('ui.render')
+    cross($, peer, 'out')
+  }
+}
+
+/** Keeps a message from another session, told apart by the envelope Claude Code puts around it. */
+async function noteReceived($: $, text: string) {
+  const { from, name } = readEnvelope(text)
+  const list = await read($, peers)
+  const sender = from ? list.find(p => p.inbox === from) : undefined
+  const now = await $.clock.now()
+  const line = preview(text)
+  await keep($, {
+    way: 'in',
+    ...(sender ? party(sender) : { name: name ?? 'another session', emoji: null, hue: null, chroma: 1, branch: null }),
+    text: line,
+    at: now,
+  })
+  if (from && rt) {
+    // On the radar at once, so the sender's totem sees its message land.
+    rt.heard = { from, at: now, mark: hash(line) }
+    await beat($)
+  }
+  if (sender) cross($, sender, 'in')
+}
+
 /** The branch moves under a session (a checkout, a new worktree): follow it. */
 async function refreshGit($: $) {
   if (!rt) return
@@ -258,8 +383,12 @@ async function markArrived($: $) {
   await update($, view, current => ({ ...current, hasArrived: true }))
 }
 
-/** Repaints the big name on a timer: the reveal on arrival, or one sweep. */
-function animate($: $, kind: 'arrive' | 'sweep') {
+/**
+ * Repaints the big name on a timer: the reveal on arrival, or one sweep. A
+ * message's sweep runs in the other session's color, right to left as it
+ * comes in and left to right as it goes out, toward the radar.
+ */
+function animate($: $, kind: 'arrive' | 'sweep', message?: { hue: number; chroma: number; way: 'in' | 'out' }) {
   const target = drawn
   if (!target || options.motion !== 'full') {
     if (kind === 'arrive') void markArrived($)
@@ -268,7 +397,9 @@ function animate($: $, kind: 'arrive' | 'sweep') {
   motion.timer?.cancel()
   const width = target.grid[0]?.length ?? 0
   const total = kind === 'arrive' ? 24 : 16
-  const colors = palette(target.identity.hue, target.isLight, target.identity.chroma)
+  const own = palette(target.identity.hue, target.isLight, target.identity.chroma)
+  const colors = message ? { ...own, glint: palette(message.hue, target.isLight, message.chroma).ink } : own
+  const isInward = message?.way === 'in'
   let i = 0
   motion.reveal = kind === 'arrive' ? 0 : 1
   motion.timer = $.clock.every(FRAME_MS, async () => {
@@ -279,7 +410,8 @@ function animate($: $, kind: 'arrive' | 'sweep') {
       motion.head = Math.round(motion.reveal * (width + 3))
     } else {
       motion.reveal = 1
-      motion.head = Math.round(-3 + ease(t) * (width + 6))
+      const run = ease(t) * (width + 6)
+      motion.head = Math.round(isInward ? width + 3 - run : -3 + run)
     }
     const isLast = i >= total
     if (isLast) {
@@ -341,6 +473,8 @@ async function boot($: $, cwd: string) {
   // Claude Code reads this once, at launch: setting it now would change
   // nothing, so totem only reads it.
   const ownsTitle = isOn(await $.env.get('CLAUDE_CODE_DISABLE_TERMINAL_TITLE'))
+  // Claude Code's own inbox for this session, the address its messages carry.
+  const inbox = await $.env.get('CLAUDE_CODE_MESSAGING_SOCKET')
   const runtime: Runtime = {
     dir,
     home,
@@ -350,6 +484,8 @@ async function boot($: $, cwd: string) {
     id: liveId(tty, sessionId),
     isTinted: false,
     ownsTitle,
+    inbox: inbox ? bareInbox(inbox) : null,
+    heard: null,
     timers: [],
   }
   rt = runtime
@@ -701,6 +837,23 @@ export const register: Register = (on, rawOptions) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // Watched, never changed: what Claude sends goes as it wrote it.
+  on('session.send', async ($, e, next) => {
+    const sent = await next(e)
+    if (sent.isDelivered) $.clock.after(0, () => seeOff($, e.to, e.text))
+
+    return sent
+  })
+
+  on('session.receive', async ($, e, next) => {
+    const queued = await next(e)
+    const isPeer =
+      (e.origin.kind === 'peer' || e.origin.kind === 'peer-send-message') && !('teammate' in e.origin) && !e.agentId
+    if (isPeer && !queued.consumed) $.clock.after(0, () => noteReceived($, queued.text ?? e.text))
+
+    return queued
+  })
+
   on('command.run', { command: 'totem' }, async ($, e) => ({ text: await runCommand($, e.args) }))
 
   // Any slash command can make Claude Code write its own title.
@@ -717,7 +870,8 @@ export const register: Register = (on, rawOptions) => {
     const el = $.ui.resolve(e)
     if (v.isForging && !v.identity) return Forging(el, basename(v.path) || 'this project')
     if (!v.identity) return next(e)
-    const [s, list, now] = await Promise.all([read($, status), read($, peers), $.clock.now()])
+    const [s, list, letters, now] = await Promise.all([read($, status), read($, peers), read($, mail), $.clock.now()])
+    const latest = letters[0] && now - letters[0].at < MAIL_FRESH_MS ? letters[0] : null
 
     // Pixel letters are the terminal's alone: other tables carry a Raster that
     // draws nothing.
@@ -745,6 +899,7 @@ export const register: Register = (on, rawOptions) => {
       since: s.since,
       now,
       peers: list,
+      mail: latest,
       word: drawing?.word ?? null,
       onJump: peer => void jump($, peer),
       onMore: () => void openPane($),
@@ -756,7 +911,7 @@ export const register: Register = (on, rawOptions) => {
     const v = await read($, view)
     const { Text } = el
     if (!v.identity) return <Text dimColor>Forging this project’s totem…</Text>
-    const [s, list, now] = await Promise.all([read($, status), read($, peers), $.clock.now()])
+    const [s, list, letters, now] = await Promise.all([read($, status), read($, peers), read($, mail), $.clock.now()])
     const drawing = e.surface === 'terminal' ? wordFor(v.identity, v.isLight, 1, null) : null
 
     return Pane({
@@ -768,6 +923,7 @@ export const register: Register = (on, rawOptions) => {
       since: s.since,
       now,
       peers: list,
+      mail: letters,
       word: drawing?.word ?? null,
       onJump: peer => void jump($, peer),
     })

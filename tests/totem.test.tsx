@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
-import type { TotemIdentity, TotemPeer, TotemView } from '../types'
+import type { TotemIdentity, TotemMail, TotemPeer, TotemView } from '../types'
 import { chooseHue, hex, hueDistance, oklch, palette, parseHex, toOklch } from '../hooks/color'
 import { canDraw, measure, rasterize, spell } from '../hooks/font'
 import { settleEmoji, slug } from '../hooks/identity'
+import { preview, readEnvelope } from '../hooks/mail'
 import { byUrgency } from '../hooks/radar'
 
 const DAISY: TotemIdentity = {
@@ -28,6 +29,8 @@ const VIEW: TotemView = {
 
 const peer = (over: Partial<TotemPeer>): TotemPeer => ({
   id: 'ttys014',
+  inbox: '/tmp/cc-socks/4242.sock',
+  heard: null,
   key: '/work/orbit',
   name: 'orbit',
   emoji: '🪐',
@@ -44,17 +47,34 @@ const peer = (over: Partial<TotemPeer>): TotemPeer => ({
   ...over,
 })
 
-const SHAPES = { view: 'view-1', status: 'status-1', peers: 'peers-1' } as const
+const LETTER: TotemMail = {
+  way: 'in',
+  name: 'orbit',
+  emoji: '🪐',
+  hue: 290,
+  chroma: 1,
+  branch: 'main',
+  text: 'Schema migration finished',
+  at: 60_000,
+}
+
+const SHAPES = { view: 'view-1', status: 'status-1', peers: 'peers-2', mail: 'mail-1' } as const
 
 /** Answers totem's state reads with these values, as a session that holds them would. */
 function seed(
   on: Parameters<TestBody>[1],
-  values: { view: TotemView; status?: { state: TotemPeer['state']; since: number }; peers?: TotemPeer[] },
+  values: {
+    view: TotemView
+    status?: { state: TotemPeer['state']; since: number }
+    peers?: TotemPeer[]
+    mail?: TotemMail[]
+  },
 ) {
   const all = {
     view: values.view,
     status: values.status ?? { state: 'working', since: 0 },
     peers: values.peers ?? [],
+    mail: values.mail ?? [],
   }
   on('state.get', (_, e) => {
     const key = e.key as keyof typeof SHAPES
@@ -140,6 +160,49 @@ describe('the band', () => {
     expect(await ui.find({ type: 'Button', key: 'peer-t2' })).toBeUndefined()
     expect(await ui.find({ type: 'Button', key: 'peers-more' })).toBeDefined()
     await ui.unmount()
+  })
+
+  test('shows a fresh message in place of the path', async ($, on) => {
+    seed(on, { view: VIEW, mail: [LETTER] })
+    const ui = await $.ui.mount({ ...band(140), surface: 'terminal' })
+
+    expect(await ui.find({ type: 'Text', text: /Schema migration finished/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /~\/work\/daisyui/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('gives the path back once the message is two minutes old', async ($, on) => {
+    seed(on, { view: VIEW, mail: [{ ...LETTER, at: -100_000 }] })
+    const ui = await $.ui.mount({ ...band(140), surface: 'terminal' })
+
+    expect(await ui.find({ type: 'Text', text: /Schema migration finished/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /~\/work\/daisyui/ })).toBeDefined()
+    await ui.unmount()
+  })
+})
+
+describe('messages', () => {
+  // As Claude Code delivers one to the receiving session's session.receive.
+  const DELIVERED =
+    '<cross-session-message from="uds:/tmp/cc-socks/82252.sock" from-name="aurora" from-mode="prompting">\n' +
+    'Migration finished, rebasing on main is safe now.\n' +
+    '</cross-session-message>'
+
+  test('the envelope names the sender by its inbox, as the radar publishes it', () => {
+    expect(readEnvelope(DELIVERED)).toEqual({ from: '/tmp/cc-socks/82252.sock', name: 'aurora' })
+  })
+
+  test('a message with no envelope has no sender, and from-name is not taken for from', () => {
+    expect(readEnvelope('Migration finished')).toEqual({ from: null, name: null })
+    expect(readEnvelope('<cross-session-message from-name="aurora">hi</cross-session-message>')).toEqual({
+      from: null,
+      name: 'aurora',
+    })
+  })
+
+  test('the preview is the first line of the message itself', () => {
+    expect(preview(DELIVERED)).toBe('Migration finished, rebasing on main is safe now.')
+    expect(preview('\n\n  Tests pass now\nmore')).toBe('Tests pass now')
   })
 })
 

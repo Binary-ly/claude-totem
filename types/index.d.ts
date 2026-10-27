@@ -18,6 +18,10 @@ export type TotemIdentity = {
 /** One live session as the radar sees it. */
 export type TotemPeer = {
   id: string
+  /** Its inbox, as Claude Code stamps it on the messages it sends; null from an older totem. */
+  inbox: string | null
+  /** The last message it took in from another session: the sender's inbox, when, and a hash of its first line. */
+  heard: { from: string; at: number; mark: number } | null
   key: string
   name: string
   emoji: string
@@ -33,6 +37,21 @@ export type TotemPeer = {
   seenAt: number
   cwd: string
   branch: string | null
+}
+
+/** One message between this session and another, as the band and the pane show it. */
+export type TotemMail = {
+  way: 'in' | 'out'
+  /** The other side: who sent it, or whom it went to. */
+  name: string
+  emoji: string | null
+  /** Null when the other side is not on the radar, so it has no color here. */
+  hue: number | null
+  chroma: number
+  branch: string | null
+  /** Its first line of its own words. */
+  text: string
+  at: number
 }
 
 export type TotemView = {
@@ -52,6 +71,7 @@ declare module 'claude-code' {
       view: Shaped<TotemView>
       status: Shaped<{ state: TotemState; since: number }>
       peers: Shaped<TotemPeer[]>
+      mail: Shaped<TotemMail[]>
     }
   }
 }

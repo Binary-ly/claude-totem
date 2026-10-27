@@ -68,6 +68,8 @@ export async function scan($: $, dir: string, selfId: string, now: number): Prom
 
   return peers
     .filter((p): p is TotemPeer => !!p && typeof p.name === 'string' && now - p.seenAt <= STALE_MS)
+    // An older totem writes neither: it shows, but its messages can't be traced.
+    .map(p => ({ ...p, inbox: typeof p.inbox === 'string' ? p.inbox : null, heard: p.heard ?? null }))
     .sort(byUrgency)
 }
 

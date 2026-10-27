@@ -15,6 +15,7 @@ totem gives each project an identity you recognize before you read anything:
 - **Tabs that say something.** The tab title becomes `🌼 daisyui ✓`: emoji, project, and a mark for its state (`◐` working, `●` needs you, `✓` your turn).
 - **A radar of your other sessions.** On the right of the band: every other live session, the one that needs you first. Click one (or press its number after `ctrl+x tab`) and its tab comes to the front.
 - **Nudges.** When another session hits a permission prompt, or finishes a turn that took more than 30 seconds, the session you are looking at tells you so.
+- **Messages wear their sender's color.** When one session messages another through Claude Code's own cross-session messaging, the receiving terminal flashes in the sender's color, its name sweeps in that color, and the band says who wrote and what. The sending band shows where the message went. totem only draws; it never sends or changes a message.
 
 ![The band above the prompt, up close: PANCAKE in amber pixel letters, then the pancake emoji and name, its branch feat/shopping-list, its path, and "your turn · 2m".](docs/band.png)
 
@@ -124,6 +125,7 @@ hooks/
   font.ts        the 5-pixel font, drawn with half blocks into Raster cells
   terminal.ts    finding the tty, OSC writes, AppleScript and CLI jumps
   radar.ts       the live-session files and their order
+  mail.ts        who a message came from, read off Claude Code's envelope
   draw.tsx       the band (big and bar) and the pane
 types/index.d.ts the state contract
 tests/           claude plugin test
